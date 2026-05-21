@@ -27,8 +27,8 @@ var oracleData = {
     "鼠"
   ],
   "killZodiacs": [
-    "狗",
-    "猴"
+    "猴",
+    "狗"
   ],
   "rangeZodiacs": [
     "猪",
@@ -91,6 +91,6 @@ var oracleData = {
     8,
     9
   ],
-  "dynamicRate9": 100.0,
-  "dynamicRate6": 100.0
+  "dynamicRate9": 0,
+  "dynamicRate6": 0
 };
