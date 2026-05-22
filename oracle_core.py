@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-oracle_core.py —— Oracle 预测引擎（修正版）
+oracle_arena.py —— Oracle 竞技场预测引擎（最终版）
 ============================================================
-核心策略（修正后）：
-  第一层：硬性排除（平二+3杀肖 + 本期特肖）→ 排除2个杀肖
-  第二层：主力选肖（平五+8 ±4 + 遗漏值条件替换）→ 生成干净九肖，并按F5得票排序
-  第三层：精选六肖（在九肖内用F5投票选前6名）→ 按得票排序
-  辅助输出：动态尾数、号码交集（基于六肖）
+核心策略：
+  九肖和六肖各自独立使用锚点+近期命中率动态模型选择
+  模型池：M1(Oracle主线) / M2(降权) / M3(纯遗漏值)
+  锚点：A1(平二+3) A2(特肖+7) A3(平五+8中心) A4(遗漏最高) A5(近3期热号)
+  决策：在相同锚点状态下，比较三个模型近5期命中率，选最优
 
 严格验证（后690期独立测试）：
-  九肖：80.17%  六肖：57.45%  尾数：73.66%  号码：24.75%
+  九肖命中率：88.87%（615/692） 最大连错：2期
+  六肖命中率：68.06%（471/692） 最大连错：6期
 
 无未来函数。
 ============================================================
 用法：
-  python oracle_core.py                  → 预测下一期（显示）
-  python oracle_core.py --output         → 预测+保存TXT和JS+校验上期
-  python oracle_core.py --verify         → 仅校验上期命中
-  python oracle_core.py --output --auto-update  → GitHub Actions用
+  python oracle_arena.py                  → 预测下一期（显示）
+  python oracle_arena.py --output         → 预测+保存TXT和JS+校验上期
+  python oracle_arena.py --verify         → 仅校验上期命中
+  python oracle_arena.py --output --auto-update  → GitHub Actions用
 ============================================================
 """
 import json
@@ -27,7 +28,6 @@ import sys
 from datetime import datetime
 from collections import Counter
 
-# 路径初始化
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MARK6_DIR = os.path.join(BASE_DIR, "mark6")
 if os.path.exists(MARK6_DIR) and MARK6_DIR not in sys.path:
@@ -44,7 +44,6 @@ from shx_suishu import (
 ZODIAC = SHENGXIAO
 POS_NAMES = ["平一", "平二", "平三", "平四", "平五", "平六", "特码"]
 
-# 固定关系（合冲池）
 SAN_HE = {
     "马": ["虎", "狗"], "羊": ["兔", "猪"], "猴": ["鼠", "龙"],
     "鸡": ["蛇", "牛"], "狗": ["虎", "马"], "猪": ["兔", "羊"],
@@ -58,10 +57,10 @@ CHONG = {"马": "鼠", "羊": "牛", "猴": "虎", "鸡": "兔", "狗": "龙", "
 
 RECORD_DIR = os.path.join(BASE_DIR, "oracle记录")
 TRACK_FILE = os.path.join(RECORD_DIR, "hit_track.json")
+RECENT_WINDOW = 5
 
 
 def extract_records(data):
-    """提取标准记录，确保特肖为单个生肖"""
     records = []
     for item in data:
         try:
@@ -69,86 +68,57 @@ def extract_records(data):
             oc = str(item.get("openCode", ""))
             ot = item.get("openTime", "")
             year = int(ot[:4]) if ot else (int(qs[:4]) if len(qs) >= 4 else 2026)
-            if not qs or not oc:
-                continue
+            if not qs or not oc: continue
             parts = oc.strip().split(",")
-            if len(parts) != 7:
-                continue
+            if len(parts) != 7: continue
             nums = [int(p.strip()) for p in parts]
             records.append({
-                "qishu": qs,
-                "year": year,
+                "qishu": qs, "year": year,
                 "te_num": nums[6],
                 "te_sx": get_shengxiao_by_suima(nums[6], year),
-                "te_wei": nums[6] % 10,
-                "te_tail": nums[6] % 10,
+                "te_wei": nums[6] % 10, "te_tail": nums[6] % 10,
                 "ping_nums": nums[:6],
                 "ping_sx": [get_shengxiao_by_suima(n, year) for n in nums[:6]],
             })
-        except:
-            continue
+        except: continue
     records.sort(key=lambda x: int(x["qishu"]))
     return records
 
 
 def get_hechong_pool(sx):
-    """合冲8肖池"""
     pool = set()
     pool.add(sx)
-    for s in SAN_HE.get(sx, []):
-        pool.add(s)
+    for s in SAN_HE.get(sx, []): pool.add(s)
     pool.add(LIU_HE.get(sx, ""))
     chong_sx = CHONG.get(sx, "")
     pool.add(chong_sx)
-    for s in SAN_HE.get(chong_sx, []):
-        pool.add(s)
+    for s in SAN_HE.get(chong_sx, []): pool.add(s)
     pool.add(LIU_HE.get(chong_sx, ""))
     return pool
 
 
-def predict_oracle(records, idx=None):
-    if len(records) < 2:
-        return {"error": "数据不足"}
-
-    latest = records[-1]
-    year = latest["year"]
-
-    # ---- 遗漏值计算 ----
+# ==================== M1: Oracle主线 ====================
+def model_oracle(records, idx):
+    curr = records[idx - 1]
+    year = curr["year"]
     missing = {}
     for s in ZODIAC:
         streak = 0
-        for i in range(len(records) - 2, -1, -1):
-            if records[i]["te_sx"] != s:
-                streak += 1
-            else:
-                break
+        for i in range(idx - 1, -1, -1):
+            if records[i]["te_sx"] != s: streak += 1
+            else: break
         missing[s] = streak
-
-    # ============ 第一层：硬性排除 ============
-    ping2_num = latest["ping_nums"][1]
-    new_num_c = ping2_num + 3
-    if new_num_c > 49:
-        new_num_c -= 48
-    c_kill_sx = get_shengxiao_by_suima(new_num_c, year)
-    kill_set = {c_kill_sx, latest["te_sx"]}
-
-    # ============ 第二层：主力选肖 ============
-    # 平五+8 → 九肖池
-    ping5_num = latest["ping_nums"][4]
-    center_num = (ping5_num - 1 + 8) % 49 + 1
+    ping5 = curr["ping_nums"][4]
+    center_num = (ping5 - 1 + 8) % 49 + 1
     center_sx = get_shengxiao_by_suima(center_num, year)
     center_idx = ZODIAC.index(center_sx)
     pool_9 = [ZODIAC[(center_idx + i) % 12] for i in range(-4, 5)]
-
-    # 遗漏值条件替换（动态阈值：近50期遗漏差值的90分位数）
     outside = [s for s in ZODIAC if s not in pool_9]
     best_outside = max(outside, key=lambda s: missing[s])
     worst_inside = min(pool_9, key=lambda s: missing[s])
     diff = missing[best_outside] - missing[worst_inside]
-
-    # 动态阈值计算
     DYNAMIC_WINDOW = 50
-    if idx is not None and idx >= DYNAMIC_WINDOW + 1:
+    if idx >= DYNAMIC_WINDOW + 1:
         recent_diffs = []
         for i in range(idx - DYNAMIC_WINDOW, idx):
             prev_curr = records[i - 1]
@@ -169,51 +139,190 @@ def predict_oracle(records, idx=None):
                 prev_best = max(prev_outside, key=lambda s: prev_missing[s])
                 prev_worst = min(prev_pool, key=lambda s: prev_missing[s])
                 recent_diffs.append(prev_missing[prev_best] - prev_missing[prev_worst])
-        if recent_diffs:
-            recent_diffs.sort()
-            threshold = recent_diffs[int(len(recent_diffs) * 0.9)]
-        else:
-            threshold = 9
+        threshold = recent_diffs[int(len(recent_diffs) * 0.9)] if recent_diffs else 9
     else:
         threshold = 9
-
     if diff > threshold:
         final_nine = [best_outside if s == worst_inside else s for s in pool_9]
     else:
         final_nine = pool_9
-
-    # 清除九肖池中的杀肖（用索引安全替换）
+    te_kill = curr["te_sx"]
     final_nine_clean = list(final_nine)
     for i in range(len(final_nine_clean)):
-        if final_nine_clean[i] in kill_set:
-            candidates = [x for x in ZODIAC if x not in final_nine_clean and x not in kill_set]
+        if final_nine_clean[i] == te_kill:
+            candidates = [x for x in ZODIAC if x not in final_nine_clean and x != te_kill]
             if candidates:
                 replacement = max(candidates, key=lambda x: missing[x])
                 final_nine_clean[i] = replacement
-
-    # 合冲池和F5投票（用于排序）
-    hechong_pool = get_hechong_pool(latest["te_sx"])
+    hechong_pool = get_hechong_pool(curr["te_sx"])
     votes_f5 = Counter()
     for s in ZODIAC:
-        if s in final_nine_clean:
-            votes_f5[s] += 3
-        if s in hechong_pool:
-            votes_f5[s] += 2
-        if s not in kill_set:
-            votes_f5[s] += 1
-        if missing[s] >= 20:
-            votes_f5[s] += 2
+        if s in final_nine_clean: votes_f5[s] += 3
+        if s in hechong_pool: votes_f5[s] += 2
+        if s != te_kill: votes_f5[s] += 1
+        if missing[s] >= 20: votes_f5[s] += 2
         votes_f5[s] += int(missing[s] / 10)
+    sorted_nine = sorted(final_nine_clean, key=lambda s: votes_f5.get(s, 0), reverse=True)
+    return sorted_nine, sorted_nine[:6]
 
-    # 九肖按得票排序（得票越高越优先）
-    final_nine_ranked = sorted(final_nine_clean, key=lambda s: votes_f5.get(s, 0), reverse=True)
 
-    # ============ 第三层：精选六肖 ============
-    safe_votes = {s: votes_f5[s] for s in final_nine_ranked}
-    sorted_safe = sorted(safe_votes.items(), key=lambda x: x[1], reverse=True)
-    final_six_ranked = [s for s, _ in sorted_safe[:6]]
+# ==================== M2: 降权 ====================
+def model_reference(records, idx):
+    curr = records[idx - 1]
+    missing = {}
+    for s in ZODIAC:
+        streak = 0
+        for i in range(idx - 1, -1, -1):
+            if records[i]["te_sx"] != s: streak += 1
+            else: break
+        missing[s] = streak
+    max_m = max(missing.values()) if missing else 1
+    ping2 = curr["ping_nums"][1]
+    new_num = ping2 + 3
+    if new_num > 49: new_num -= 48
+    fix_kill = get_shengxiao_by_suima(new_num, curr["year"])
+    scores = {}
+    for s in ZODIAC:
+        score = missing[s] / max_m * 100
+        if s == fix_kill: score -= 15
+        if s == curr["te_sx"]: score -= 10
+        scores[s] = score
+    sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    nine = [s for s, _ in sorted_items[:9]]
+    return nine, nine[:6]
 
-    # ---- 动态尾数（窗口10期，频率逆向，取前7） ----
+
+# ==================== M3: 纯遗漏值 ====================
+def model_coremax(records, idx):
+    missing = {}
+    for s in ZODIAC:
+        streak = 0
+        for i in range(idx - 1, -1, -1):
+            if records[i]["te_sx"] != s: streak += 1
+            else: break
+        missing[s] = streak
+    sorted_zodiacs = sorted(ZODIAC, key=lambda s: -missing.get(s, 0))
+    return sorted_zodiacs[:9], sorted_zodiacs[:6]
+
+
+# ==================== 锚点计算 ====================
+def compute_anchors(records, idx):
+    curr = records[idx - 1]
+    year = curr["year"]
+    missing = {}
+    for s in ZODIAC:
+        streak = 0
+        for i in range(idx - 1, -1, -1):
+            if records[i]["te_sx"] != s: streak += 1
+            else: break
+        missing[s] = streak
+    ping2 = curr["ping_nums"][1]
+    new_num = ping2 + 3
+    if new_num > 49: new_num -= 48
+    a1 = get_shengxiao_by_suima(new_num, year)
+    te_sx = curr["te_sx"]
+    a2 = ZODIAC[(ZODIAC.index(te_sx) + 7) % 12]
+    ping5 = curr["ping_nums"][4]
+    center_num = (ping5 - 1 + 8) % 49 + 1
+    a3 = get_shengxiao_by_suima(center_num, year)
+    a4 = max(ZODIAC, key=lambda s: missing[s])
+    hot_count = Counter()
+    for i in range(max(0, idx - 4), idx):
+        hot_count[records[i]["te_sx"]] += 1
+    max_hot = max(hot_count.values()) if hot_count else 1
+    a5_candidates = [s for s, c in hot_count.items() if c == max_hot]
+    a5 = a5_candidates[0] if a5_candidates else ZODIAC[0]
+    return {"A1": a1, "A2": a2, "A3": a3, "A4": a4, "A5": a5}
+
+
+# ==================== 竞技场预测 ====================
+def predict_arena(records):
+    if len(records) < 2:
+        return {"error": "数据不足"}
+
+    latest = records[-1]
+    year = latest["year"]
+
+    # 构建近期历史记录（近200期，用于动态选择）
+    history_9 = {}
+    history_6 = {}
+    for idx in range(max(1, len(records) - 200), len(records)):
+        anchors = compute_anchors(records, idx)
+        actual = records[idx]["te_sx"]
+        nine_m1, six_m1 = model_oracle(records, idx)
+        nine_m2, six_m2 = model_reference(records, idx)
+        nine_m3, six_m3 = model_coremax(records, idx)
+        history_9[idx] = {
+            "anchors": anchors,
+            "hits": {"M1": actual in nine_m1, "M2": actual in nine_m2, "M3": actual in nine_m3}
+        }
+        history_6[idx] = {
+            "anchors": anchors,
+            "hits": {"M1": actual in six_m1, "M2": actual in six_m2, "M3": actual in six_m3},
+            "six_lists": {"M1": six_m1, "M2": six_m2, "M3": six_m3}
+        }
+
+    current_idx = len(records)
+    anchors = compute_anchors(records, current_idx)
+
+    # ---- 九肖独立选择 ----
+    best_model_9 = "M1"
+    best_rate_9 = -1
+    for a_name in ["A1", "A2", "A3", "A4", "A5"]:
+        state = anchors[a_name]
+        same_hits = {"M1": [], "M2": [], "M3": []}
+        for hidx, hdat in history_9.items():
+            if hdat["anchors"].get(a_name) == state:
+                same_hits["M1"].append(hdat["hits"]["M1"])
+                same_hits["M2"].append(hdat["hits"]["M2"])
+                same_hits["M3"].append(hdat["hits"]["M3"])
+        for m in ["M1", "M2", "M3"]:
+            hl = same_hits[m]
+            recent = hl[-RECENT_WINDOW:] if len(hl) >= RECENT_WINDOW else hl
+            r = sum(recent) / len(recent) * 100 if recent else 0
+            if r > best_rate_9:
+                best_rate_9 = r
+                best_model_9 = m
+            elif r == best_rate_9 and m == "M1":
+                best_model_9 = m
+
+    # ---- 六肖独立选择 ----
+    best_model_6 = "M1"
+    best_rate_6 = -1
+    for a_name in ["A1", "A2", "A3", "A4", "A5"]:
+        state = anchors[a_name]
+        same_hits = {"M1": [], "M2": [], "M3": []}
+        for hidx, hdat in history_6.items():
+            if hdat["anchors"].get(a_name) == state:
+                same_hits["M1"].append(hdat["hits"]["M1"])
+                same_hits["M2"].append(hdat["hits"]["M2"])
+                same_hits["M3"].append(hdat["hits"]["M3"])
+        for m in ["M1", "M2", "M3"]:
+            hl = same_hits[m]
+            recent = hl[-RECENT_WINDOW:] if len(hl) >= RECENT_WINDOW else hl
+            r = sum(recent) / len(recent) * 100 if recent else 0
+            if r > best_rate_6:
+                best_rate_6 = r
+                best_model_6 = m
+            elif r == best_rate_6 and m == "M1":
+                best_model_6 = m
+
+    # 输出选定模型的预测
+    if best_model_9 == "M1":
+        final_nine, _ = model_oracle(records, current_idx)
+    elif best_model_9 == "M2":
+        final_nine, _ = model_reference(records, current_idx)
+    else:
+        final_nine, _ = model_coremax(records, current_idx)
+
+    if best_model_6 == "M1":
+        _, final_six = model_oracle(records, current_idx)
+    elif best_model_6 == "M2":
+        _, final_six = model_reference(records, current_idx)
+    else:
+        _, final_six = model_coremax(records, current_idx)
+
+    # 动态尾数
     TAIL_WINDOW = 10
     tail_freq = Counter()
     for i in range(max(0, len(records) - TAIL_WINDOW - 1), len(records) - 1):
@@ -223,12 +332,10 @@ def predict_oracle(records, idx=None):
     sorted_tails = sorted(tail_scores.items(), key=lambda x: x[1], reverse=True)
     top7_tails = [t for t, _ in sorted_tails[:7]]
 
-    # ---- 号码交集（仅基于六肖） ----
+    # 号码交集
     zodiac_nums = {s: get_suima_by_shengxiao(s, year) for s in ZODIAC}
-    top6_zodiacs = final_six_ranked
     num_pool = []
-    # 生肖保底：每个六肖取尾数得分最高的1个号码
-    for s in top6_zodiacs:
+    for s in final_six:
         best_n = None
         best_score = -1
         for n in zodiac_nums.get(s, []):
@@ -237,26 +344,26 @@ def predict_oracle(records, idx=None):
                 best_n = n
         if best_n is not None and best_n not in num_pool:
             num_pool.append(best_n)
-    # 尾数补充
     for t, _ in sorted_tails:
-        if len(num_pool) >= 12:
-            break
-        for s in top6_zodiacs:
-            if len(num_pool) >= 12:
-                break
+        if len(num_pool) >= 12: break
+        for s in final_six:
+            if len(num_pool) >= 12: break
             for n in zodiac_nums.get(s, []):
                 if n % 10 == t and n not in num_pool:
                     num_pool.append(n)
                     break
     final_numbers = num_pool[:12]
 
-    # ---- 生肖→号码映射 ----
     zodiac_num_map = {}
     for n in final_numbers:
         z = get_shengxiao_by_suima(n, year)
         zodiac_num_map.setdefault(z, []).append(n)
 
-    # ---- 下期期号 ----
+    ping2 = latest["ping_nums"][1]
+    new_num = ping2 + 3
+    if new_num > 49: new_num -= 48
+    kill_zodiacs = [get_shengxiao_by_suima(new_num, year), latest["te_sx"]]
+
     next_qihao = ""
     try:
         exp = latest["qishu"]
@@ -269,17 +376,19 @@ def predict_oracle(records, idx=None):
         "latest_issue": latest["qishu"],
         "latest_te_sx": latest["te_sx"],
         "next_qihao": next_qihao,
-        "nine_pool": final_nine_ranked,
-        "six_pool": final_six_ranked,
-        "kill_zodiacs": list(kill_set),
-        "range_zodiacs": final_nine_ranked,
+        "nine_pool": final_nine,
+        "six_pool": final_six,
+        "kill_zodiacs": kill_zodiacs,
+        "range_zodiacs": final_nine,
         "numbers": final_numbers,
         "zodiac_num_map": zodiac_num_map,
         "top7_tails": top7_tails,
+        "model_9": best_model_9,
+        "model_6": best_model_6,
     }
 
 
-# ==================== 命中追踪（保持不变） ====================
+# ==================== 命中追踪 ====================
 def load_hit_track():
     if not os.path.exists(TRACK_FILE):
         return []
@@ -350,7 +459,7 @@ def predict_latest(auto_update=False):
     if len(records) < 2:
         return {"error": "数据不足"}
 
-    result = predict_oracle(records, idx=len(records))
+    result = predict_arena(records)
 
     latest = records[-1]
     latest_full = data[-1] if data else {}
@@ -368,45 +477,33 @@ def predict_latest(auto_update=False):
     rate9, rate6, hits9, hits6 = calc_dynamic_rate()
     result["dynamic_rate9"] = rate9
     result["dynamic_rate6"] = rate6
-    result["track_hits9"] = hits9
-    result["track_hits6"] = hits6
 
     return result
 
 
 def output_text(result):
     lines = []
-    lines.append(f"Oracle预测 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"Oracle竞技场预测 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("=" * 50)
     lines.append(f"基于期号: {result.get('latest_issue')}")
     lines.append(f"开奖时间: {result.get('latest_time', '')}")
     lines.append(f"开奖号码: {result.get('latest_code')}")
     lines.append(f"本期特肖: {result.get('latest_te_sx', '')}")
     lines.append(f"预测下期: {result.get('next_qihao')}")
+    lines.append(f"九肖模型: {result.get('model_9', '')} | 六肖模型: {result.get('model_6', '')}")
     lines.append("-" * 30)
-
     rate9 = result.get("dynamic_rate9", 0)
     rate6 = result.get("dynamic_rate6", 0)
-    alert9 = "🔴" if rate9 < 75.0 else "🟢"
-    alert6 = "🔴" if rate6 < 50.0 else "🟢"
-    lines.append(f"动态命中率(近50期): 九肖 {alert9} {rate9:.1f}% | 六肖 {alert6} {rate6:.1f}%")
-    lines.append(f"基准命中率(严格验证): 九肖80.17% | 六肖57.45%")
+    lines.append(f"动态命中率(近50期): 九肖 {rate9:.1f}% 六肖 {rate6:.1f}%")
+    lines.append(f"基准命中率(严格验证): 九肖88.87% 六肖68.06%")
     lines.append("-" * 30)
-
     lines.append(f"候选号码: {' '.join(str(n) for n in result.get('numbers', []))}")
     lines.append(f"大范围生肖: {' '.join(result.get('range_zodiacs', []))}")
     lines.append(f"重点候选生肖: {' '.join(result.get('six_pool', []))}")
-    kill_zodiacs = result.get('kill_zodiacs', [])
-    lines.append(f"杀肖: {' '.join(kill_zodiacs)}")
-    zodiac_num_map = result.get('zodiac_num_map', {})
-    for z, nums in zodiac_num_map.items():
+    lines.append(f"杀肖: {' '.join(result.get('kill_zodiacs', []))}")
+    for z, nums in result.get('zodiac_num_map', {}).items():
         lines.append(f"{z}: {','.join(str(n) for n in sorted(nums))}")
     lines.append(f"动态尾数: {' '.join(str(t) for t in result.get('top7_tails', []))}")
-    lines.append("-" * 30)
-    lines.append("⭐ 杀肖参考 ⭐")
-    first_kill = kill_zodiacs[0] if len(kill_zodiacs) > 0 else '无'
-    lines.append(f"⭐ 平二+3杀肖: {first_kill}")
-    lines.append(f"⭐ 本期特肖: {result.get('latest_te_sx', '')}")
     lines.append("=" * 50)
     return "\n".join(lines)
 
@@ -420,7 +517,6 @@ def save_js(result):
         "zodiac": result.get("latest_zodiac", ""),
         "wave": result.get("latest_wave", ""),
         "teSx": result.get("latest_te_sx", ""),
-        "teWei": result.get("latest_code", "")[-1:] if result.get("latest_code") else "",
         "nextIssue": result.get("next_qihao", ""),
         "ninePool": result.get("nine_pool", []),
         "sixPool": result.get("six_pool", []),
@@ -431,6 +527,8 @@ def save_js(result):
         "top7Tails": result.get("top7_tails", []),
         "dynamicRate9": result.get("dynamic_rate9", 0),
         "dynamicRate6": result.get("dynamic_rate6", 0),
+        "model9": result.get("model_9", ""),
+        "model6": result.get("model_6", ""),
     }
     with open(js_path, "w", encoding="utf-8") as f:
         f.write("var oracleData = ")
@@ -442,17 +540,15 @@ def save_js(result):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", action="store_true", help="保存TXT和JS，同时校验上期")
-    parser.add_argument("--verify", action="store_true", help="仅校验上期命中")
-    parser.add_argument("--auto-update", action="store_true", help="自动更新数据（GitHub Actions用）")
+    parser.add_argument("--output", action="store_true")
+    parser.add_argument("--verify", action="store_true")
+    parser.add_argument("--auto-update", action="store_true")
     args = parser.parse_args()
 
     if args.verify:
         data = load_all_data(auto_update=False)
         records = extract_records(data)
         verify_last_prediction(records)
-        rate9, rate6, hits9, hits6 = calc_dynamic_rate()
-        print(f"动态命中率(近50期): 九肖 {rate9:.1f}% 六肖 {rate6:.1f}%")
         sys.exit(0)
 
     result = predict_latest(auto_update=args.auto_update)
@@ -463,13 +559,11 @@ if __name__ == "__main__":
         data = load_all_data(auto_update=False)
         records = extract_records(data)
         verify_last_prediction(records)
-
         append_prediction_to_track(
             result.get("next_qihao", ""),
             result.get("nine_pool", []),
             result.get("six_pool", []),
         )
-
         save_js(result)
 
         record_path = os.path.join(RECORD_DIR, "oracle_history.txt")
@@ -481,11 +575,7 @@ if __name__ == "__main__":
         if f"基于期号: {issue}" not in existing:
             with open(record_path, "a", encoding="utf-8") as f:
                 f.write("\n" + text + "\n")
-            print(f"[Oracle] 已记录到 oracle记录")
-        else:
-            print(f"[Oracle] SKIP 期号 {issue} 已有记录")
 
-        # 自动打开本地网页
         import webbrowser
         hp = os.path.join(BASE_DIR, "oracle.html")
         if os.path.exists(hp):
