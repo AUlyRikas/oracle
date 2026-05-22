@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+	<title>挑码助手</title>
+	<style>
+		* { margin: 0; padding: 0; box-sizing: border-box; font-family: "Microsoft YaHei", sans-serif; }
+		body { background: #f5f7fa; padding: 12px; }
+		.container { max-width: 500px; margin: 0 auto; }
+		.title { text-align: center; font-size: 20px; margin-bottom: 16px; color: #333; }
+		.panel { background: #fff; border-radius: 12px; padding: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+		.panel-title { font-size: 15px; font-weight: bold; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #eee; }
+		.tmTab { width: 100%; border-collapse: collapse; background: #f9f9f9; }
+		.tmTab td { padding: 6px 8px; border: 1px solid #e0e0e0; vertical-align: top; }
+		.tmTab tr td:first-child { background: #47ae04; color: #fff; font-weight: bold; width: 70px; text-align: center; font-size: 13px; }
+		.tdBox { display: flex; flex-wrap: wrap; gap: 5px; }
+		.tdBox div { padding: 4px 8px; background: #ebebeb; border: 1px solid #d9d9d9; border-radius: 4px; cursor: pointer; font-size: 12px; }
+		.tdBox div.act { background: #fff500; color: #f00; font-weight: bold; }
+		.result-box { margin-top: 12px; background: #f8f8f8; border: 1px solid #eee; border-radius: 8px; padding: 10px; }
+		.result-title { font-size: 13px; margin-bottom: 6px; font-weight: bold; }
+		.retList { display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow-y: auto; }
+		.retList div { width: 34px; height: 34px; line-height: 34px; text-align: center; border-radius: 50%; background: #fff; border: 1px solid #ddd; font-weight: bold; font-size: 13px; }
+		.btn-group { display: flex; gap: 10px; margin-top: 12px; }
+		.btn { flex: 1; padding: 8px; text-align: center; border-radius: 6px; cursor: pointer; font-size: 13px; border: none; color: #fff; }
+		.btn-warning { background: #ff9800; }
+		.btn-copy { background: #2196f3; }
+		.css01,.css02,.css07,.css08,.css12,.css13,.css18,.css19,.css23,.css24,.css29,.css30,.css34,.css35,.css40,.css45,.css46{ color: red; border-color: red!important; }
+		.css03,.css04,.css09,.css10,.css14,.css15,.css20,.css25,.css26,.css31,.css36,.css37,.css41,.css42,.css47,.css48{ color: blue; border-color: blue!important; }
+		.css05,.css06,.css11,.css16,.css17,.css21,.css22,.css27,.css28,.css32,.css33,.css38,.css39,.css43,.css44,.css49{ color: green; border-color: green!important; }
+		.toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); color: #fff; padding: 10px 20px; border-radius: 6px; z-index: 999; display: none; }
+		.toast.show { display: block; }
+	</style>
+</head>
+<body>
+<div class="container">
+	<h1 class="title">挑码助手</h1>
+	<div id="vue">
+		<div class="panel">
+			<div class="panel-title">号码分类</div>
+			<table class="tmTab">
+				<tbody>
+					<tr v-for="(box, i) in boxList">
+						<td><div>{{ box.title }}</div></td>
+						<td><div class="tdBox"><div v-for="(item, idx) in box.content" @click="select(item, idx, i)" :class="{act: item.active}">{{ item.name }}</div></div></td>
+					</tr>
+				</tbody>
+			</table>
+			<div class="result-box">
+				<div class="result-title">已选号码 ({{ yixuanList.length }})</div>
+				<div class="retList"><div v-for="item in yixuanList" :class="getCss(item)">{{ item | numToStr }}</div></div>
+			</div>
+			<div class="btn-group">
+				<button class="btn btn-warning" @click="rstSelect">重置选择</button>
+				<button class="btn btn-copy" @click="copy">复制结果</button>
+			</div>
+		</div>
+	</div>
+	<div class="toast" :class="{show: showinfo}">复制成功</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.min.js"></script>
+<script>
+var vm = new Vue({
+    el: '#vue',
+    data: {
+        showinfo: false,
+        cur: 1,
+        list: [{num:'??',sx:'-',wx:'-'},{num:'??',sx:'-',wx:'-'},{num:'??',sx:'-',wx:'-'},{num:'??',sx:'-',wx:'-'},{num:'??',sx:'-',wx:'-'},{num:'??',sx:'-',wx:'-'},{num:'??',sx:'-',wx:'-'}],
+        yixuan: true,
+        boxList: [
+            { title:'生肖', content:[
+                {name:'马',num:[1,13,25,37,49]},{name:'蛇',num:[2,14,26,38]},{name:'龙',num:[3,15,27,39]},
+                {name:'兔',num:[4,16,28,40]},{name:'虎',num:[5,17,29,41]},{name:'牛',num:[6,18,30,42]},
+                {name:'鼠',num:[7,19,31,43]},{name:'猪',num:[8,20,32,44]},{name:'狗',num:[9,21,33,45]},
+                {name:'鸡',num:[10,22,34,46]},{name:'猴',num:[11,23,35,47]},{name:'羊',num:[12,24,36,48]}
+            ]},
+            { title:'波色', content:[
+                {name:'红',num:[1,2,7,8,12,13,18,19,23,24,29,30,34,35,40,45,46]},
+                {name:'绿',num:[5,6,11,16,17,21,22,27,28,32,33,38,39,43,44,49]},
+                {name:'蓝',num:[3,4,9,10,14,15,20,25,26,31,36,37,41,42,47,48]}
+            ]},
+            { title:'五行', content:[
+                {name:'金',num:[7,8,21,22,29,30,37,38]},{name:'木',num:[3,4,11,12,19,20,33,34,41,42,49]},
+                {name:'水',num:[9,10,17,18,25,26,39,40,47,48]},{name:'火',num:[5,6,13,14,27,28,35,36,43,44]},
+                {name:'土',num:[1,2,15,16,23,24,31,32,45,46]}
+            ]},
+            { title:'大小', content:[
+                {name:'大',num:[25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49]},
+                {name:'小',num:[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]}
+            ]},
+            { title:'单双', content:[
+                {name:'单',num:[1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35,37,39,41,43,45,47,49]},
+                {name:'双',num:[2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48]}
+            ]},
+            { title:'大小单双', content:[
+                {name:'大单',num:[25,27,29,31,33,35,37,39,41,43,45,47,49]},{name:'小单',num:[1,3,5,7,9,11,13,15,17,19,21,23]},
+                {name:'大双',num:[26,28,30,32,34,36,38,40,42,44,46,48]},{name:'小双',num:[2,4,6,8,10,12,14,16,18,20,22,24]}
+            ]},
+            { title:'波色单双', content:[
+                {name:'红单',num:[1,7,13,19,23,29,35,45]},{name:'红双',num:[2,8,12,18,24,30,34,40,46]},
+                {name:'绿单',num:[5,11,17,21,27,33,39,43,49]},{name:'绿双',num:[6,16,22,28,32,38,44]},
+                {name:'蓝单',num:[3,9,15,25,31,37,41,47]},{name:'蓝双',num:[4,10,14,20,26,36,42,48]}
+            ]},
+            { title:'七段', content:[
+                {name:'1段',num:[1,2,3,4,5,6,7]},{name:'2段',num:[8,9,10,11,12,13,14]},{name:'3段',num:[15,16,17,18,19,20,21]},
+                {name:'4段',num:[22,23,24,25,26,27,28]},{name:'5段',num:[29,30,31,32,33,34,35]},{name:'6段',num:[36,37,38,39,40,41,42]},
+                {name:'7段',num:[43,44,45,46,47,48,49]}
+            ]},
+            { title:'五门', content:[
+                {name:'1门',num:[1,2,3,4,5,6,7,8,9]},{name:'2门',num:[10,11,12,13,14,15,16,17,18]},{name:'3门',num:[19,20,21,22,23,24,25,26,27]},
+                {name:'4门',num:[28,29,30,31,32,33,34,35,36,37]},{name:'5门',num:[38,39,40,41,42,43,44,45,46,47,48,49]}
+            ]},
+            { title:'头数', content:[
+                {name:'0头',num:[1,2,3,4,5,6,7,8,9]},{name:'1头',num:[10,11,12,13,14,15,16,17,18,19]},{name:'2头',num:[20,21,22,23,24,25,26,27,28,29]},
+                {name:'3头',num:[30,31,32,33,34,35,36,37,38,39]},{name:'4头',num:[40,41,42,43,44,45,46,47,48,49]}
+            ]},
+            { title:'尾数', content:[
+                {name:'0尾',num:[10,20,30,40]},{name:'1尾',num:[1,11,21,31,41]},{name:'2尾',num:[2,12,22,32,42]},{name:'3尾',num:[3,13,23,33,43]},
+                {name:'4尾',num:[4,14,24,34,44]},{name:'5尾',num:[5,15,25,35,45]},{name:'6尾',num:[6,16,26,36,46]},{name:'7尾',num:[7,17,27,37,47]},
+                {name:'8尾',num:[8,18,28,38,48]},{name:'9尾',num:[9,19,29,39,49]}
+            ]},
+            { title:'合数', content:[
+                {name:'合01',num:[1,10]},{name:'合02',num:[2,11,20]},{name:'合03',num:[3,12,21,30]},{name:'合04',num:[4,13,22,31,40]},
+                {name:'合05',num:[5,14,23,32,41]},{name:'合06',num:[6,15,24,33,42]},{name:'合07',num:[7,16,25,34,43]},{name:'合08',num:[8,17,26,35,44]},
+                {name:'合09',num:[9,18,27,36,45]},{name:'合10',num:[19,28,37,46]},{name:'合11',num:[29,38,47]},{name:'合12',num:[39,48]},{name:'合13',num:[49]}
+            ]},
+            { title:'合单双', content:[
+                {name:'合单',num:[1,3,5,7,9,10,12,14,16,18,21,23,25,27,29,30,32,34,36,38,41,43,45,47,49]},
+                {name:'合双',num:[2,4,6,8,11,13,15,17,19,20,22,24,26,28,31,33,35,37,39,40,42,44,46,48]}
+            ]},
+            { title:'余七', content:[
+                {name:'6余0',num:[6,12,18,24,30,36,42,48]},{name:'6余1',num:[1,7,13,19,25,31,37,43,49]},{name:'6余2',num:[2,8,14,20,26,32,38,44]},
+                {name:'6余3',num:[3,9,15,21,27,33,39,45]},{name:'6余4',num:[4,10,16,22,28,34,40,46]},{name:'6余5',num:[5,11,17,23,29,35,41,47]}
+            ]},
+            { title:'余六', content:[
+                {name:'7余0',num:[7,14,21,28,35,42,49]},{name:'7余1',num:[1,8,15,22,29,36,43]},{name:'7余2',num:[2,9,16,23,30,37,44]},
+                {name:'7余3',num:[3,10,17,24,31,38,45]},{name:'7余4',num:[4,11,18,25,32,39,46]},{name:'7余5',num:[5,12,19,26,33,40,47]},
+                {name:'7余6',num:[6,13,20,27,34,41,48]}
+            ]},
+            { title:'其他', content:[
+                {name:'女肖',num:[2,4,6,8,10,14,16,18,20,22,26,28,30,32,34,38,40,42,44,46]},
+                {name:'男肖',num:[1,3,5,7,9,11,12,13,15,17,19,21,23,24,25,27,29,31,33,35,36,37,39,41,43,45,47,48,49]},
+                {name:'家禽',num:[2,3,4,6,7,12,14,15,16,18,19,24,26,27,28,30,31,36,38,39,40,42,43,48]},
+                {name:'野兽',num:[1,5,8,9,10,11,13,17,20,21,22,23,25,29,32,33,34,35,37,41,44,45,46,47,49]},
+                {name:'阴性',num:[1,2,3,7,8,9,13,14,15,19,20,21,25,26,27,31,32,33,37,38,39,43,44,45,49]},
+                {name:'阳性',num:[4,5,6,10,11,12,16,17,18,22,23,24,28,29,30,34,35,36,40,41,42,46,47,48]},
+                {name:'天肖',num:[2,5,7,9,10,12,14,17,19,21,22,24,26,29,31,33,34,36,38,41,43,45,46,48]},
+                {name:'地肖',num:[1,3,4,6,8,11,13,15,16,18,20,23,25,27,28,30,32,35,37,39,40,42,44,47,49]},
+                {name:'吉美',num:[4,6,7,8,9,10,16,18,19,20,21,22,28,30,31,32,33,34,40,42,43,44,45,46]},
+                {name:'凶丑',num:[1,2,3,5,11,12,13,14,15,17,23,24,25,26,27,29,35,36,37,38,39,41,47,48,49]},
+                {name:'白边',num:[1,2,3,4,11,12,13,14,15,16,23,24,25,26,27,28,35,36,37,38,39,40,47,48,49]},
+                {name:'黑边',num:[5,6,7,8,9,10,17,18,19,20,21,22,29,30,31,32,33,34,41,42,43,44,45,46]},
+                {name:'单笔',num:[1,2,4,7,8,9,13,14,16,19,20,21,25,26,28,31,32,33,37,38,40,43,44,45,49]},
+                {name:'双笔',num:[3,5,6,10,11,12,15,17,18,22,23,24,27,29,30,34,35,36,39,41,42,46,47,48]},
+                {name:'红肖',num:[1,4,7,10,13,16,19,22,25,28,31,34,37,40,43,46,49]},
+                {name:'蓝肖',num:[2,5,8,11,14,17,20,23,26,29,32,35,38,41,44,47]},
+                {name:'绿肖',num:[3,6,9,12,15,18,21,24,27,30,33,36,39,42,45,48]}
+            ]}
+        ],
+        selectNum: [],
+        iarr: [],
+        yixuanList: [],
+    },
+    methods: {
+copy: function() {
+    var d = this.yixuanList;
+    if (d.length === 0) { alert("请先选择号码"); return; }
+    var r = d.map(function(n) { return n < 10 ? '0' + n : n; }).join(',');
+    
+    // 优先使用现代 Clipboard API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(r).then(function() {
+            this.showinfo = true;
+            setTimeout(function() { this.showinfo = false; }.bind(this), 1000);
+        }.bind(this)).catch(function() {
+            // 降级到老方法
+            this.fallbackCopy(r);
+        }.bind(this));
+    } else {
+        // 降级到老方法
+        this.fallbackCopy(r);
+    }
+},
+fallbackCopy: function(text) {
+    var textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+        document.execCommand('copy');
+        this.showinfo = true;
+        setTimeout(function() { this.showinfo = false; }.bind(this), 1000);
+    } catch (err) {
+        alert("复制失败，请手动复制");
+    }
+    document.body.removeChild(textArea);
+},
+        getRandomInt: function(min, max) { return Math.floor(Math.random() * (max - min + 1) + min); },
+        select: function(item, index, k) {
+            if (item.active) {
+                Vue.set(item, 'active', false);
+                this.selectNum = this.selectNum.filter(function(n) { return n.name !== item.name; });
+            } else {
+                Vue.set(item, 'active', true);
+                Vue.set(item, 'i', k);
+                this.selectNum.push(item);
+            }
+            if (this.selectNum.length > 0) {
+                var iarr = [];
+                this.selectNum.forEach(function(s) {
+                    iarr[s.i] = iarr[s.i] ? iarr[s.i].concat(s.num) : s.num.slice();
+                });
+                var jarr = [];
+                iarr.forEach(function(a) {
+                    if (a) {
+                        jarr = jarr.length ? jarr.filter(function(v) { return a.includes(v); }) : a.slice();
+                    }
+                });
+                this.yixuanList = jarr.sort(function(a, b) { return a - b; });
+            } else {
+                this.yixuanList = [];
+            }
+        },
+        rstSelect: function() {
+            this.boxList.forEach(function(b) {
+                b.content.forEach(function(c) { Vue.set(c, 'active', false); });
+            });
+            this.yixuanList = [];
+            this.selectNum = [];
+        },
+    },
+    computed: {
+        getCss: function() {
+            return function(n) {
+                return 'css' + (n < 10 ? '0' + n : n);
+            };
+        }
+    },
+    filters: {
+        numToStr: function(v) {
+            return v < 10 ? '0' + v : v;
+        }
+    }
+});
+</script>
+</body>
+</html>
