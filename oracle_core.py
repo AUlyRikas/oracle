@@ -106,7 +106,7 @@ def get_hechong_pool(sx):
     return pool
 
 
-def predict_oracle(records):
+def predict_oracle(records, idx=None):
     if len(records) < 2:
         return {"error": "数据不足"}
 
@@ -140,11 +140,44 @@ def predict_oracle(records):
     center_idx = ZODIAC.index(center_sx)
     pool_9 = [ZODIAC[(center_idx + i) % 12] for i in range(-4, 5)]
 
-    # 遗漏值条件替换
+    # 遗漏值条件替换（动态阈值：近50期遗漏差值的90分位数）
     outside = [s for s in ZODIAC if s not in pool_9]
     best_outside = max(outside, key=lambda s: missing[s])
     worst_inside = min(pool_9, key=lambda s: missing[s])
-    if missing[best_outside] - missing[worst_inside] > 9:
+    diff = missing[best_outside] - missing[worst_inside]
+
+    # 动态阈值计算
+    DYNAMIC_WINDOW = 50
+    if idx is not None and idx >= DYNAMIC_WINDOW + 1:
+        recent_diffs = []
+        for i in range(idx - DYNAMIC_WINDOW, idx):
+            prev_curr = records[i - 1]
+            prev_ping5 = prev_curr["ping_nums"][4]
+            prev_center = (prev_ping5 - 1 + 8) % 49 + 1
+            prev_center_sx = get_shengxiao_by_suima(prev_center, prev_curr["year"])
+            prev_center_idx = ZODIAC.index(prev_center_sx)
+            prev_pool = [ZODIAC[(prev_center_idx + j) % 12] for j in range(-4, 5)]
+            prev_missing = {}
+            for s in ZODIAC:
+                streak = 0
+                for k in range(i - 1, -1, -1):
+                    if records[k]["te_sx"] != s: streak += 1
+                    else: break
+                prev_missing[s] = streak
+            prev_outside = [s for s in ZODIAC if s not in prev_pool]
+            if prev_outside and prev_pool:
+                prev_best = max(prev_outside, key=lambda s: prev_missing[s])
+                prev_worst = min(prev_pool, key=lambda s: prev_missing[s])
+                recent_diffs.append(prev_missing[prev_best] - prev_missing[prev_worst])
+        if recent_diffs:
+            recent_diffs.sort()
+            threshold = recent_diffs[int(len(recent_diffs) * 0.9)]
+        else:
+            threshold = 9
+    else:
+        threshold = 9
+
+    if diff > threshold:
         final_nine = [best_outside if s == worst_inside else s for s in pool_9]
     else:
         final_nine = pool_9
@@ -317,7 +350,7 @@ def predict_latest(auto_update=False):
     if len(records) < 2:
         return {"error": "数据不足"}
 
-    result = predict_oracle(records)
+    result = predict_oracle(records, idx=len(records))
 
     latest = records[-1]
     latest_full = data[-1] if data else {}
