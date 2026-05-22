@@ -27,8 +27,8 @@ var oracleData = {
     "猪"
   ],
   "killZodiacs": [
-    "猴",
-    "狗"
+    "狗",
+    "猴"
   ],
   "rangeZodiacs": [
     "鸡",
