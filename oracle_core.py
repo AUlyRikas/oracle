@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-oracle_core.py —— Oracle 预测引擎（最终版）
+oracle_core.py —— Oracle 预测引擎（修正版）
 ============================================================
-核心策略：
-  1. 平五+8 → ±4 九肖池 + 遗漏值条件替换（差值>9才换）
-  2. F5多信号投票制六肖
-  3. 动态尾数（窗口10期，频率逆向，取前7）
-  4. 号码交集（生肖保底+尾数补充）
-  5. 杀肖参考（平二+3 + 本期特肖）※金标规则将另行加载
+核心策略（修正后）：
+  第一层：硬性排除（平二+3杀肖 + 本期特肖）→ 排除2个杀肖
+  第二层：主力选肖（平五+8 ±4 + 遗漏值条件替换）→ 生成干净九肖，并按F5得票排序
+  第三层：精选六肖（在九肖内用F5投票选前6名）→ 按得票排序
+  辅助输出：动态尾数、号码交集（基于六肖）
 
 严格验证（后690期独立测试）：
   九肖：80.17%  六肖：57.45%  尾数：73.66%  号码：24.75%
 
-无未来函数，不依赖硬编码路径。
+无未来函数。
 ============================================================
 用法：
-  python oracle_core.py                  → 预测下一期（只显示，不保存）
+  python oracle_core.py                  → 预测下一期（显示）
   python oracle_core.py --output         → 预测+保存TXT和JS+校验上期
   python oracle_core.py --verify         → 仅校验上期命中
+  python oracle_core.py --output --auto-update  → GitHub Actions用
 ============================================================
 """
 import json
@@ -107,14 +107,13 @@ def get_hechong_pool(sx):
 
 
 def predict_oracle(records):
-    """核心预测，返回字典"""
     if len(records) < 2:
         return {"error": "数据不足"}
 
     latest = records[-1]
     year = latest["year"]
 
-    # 1. 遗漏值
+    # ---- 遗漏值计算 ----
     missing = {}
     for s in ZODIAC:
         streak = 0
@@ -125,13 +124,23 @@ def predict_oracle(records):
                 break
         missing[s] = streak
 
-    # 2. 平五+8 → 九肖池 + 条件替换
+    # ============ 第一层：硬性排除 ============
+    ping2_num = latest["ping_nums"][1]
+    new_num_c = ping2_num + 3
+    if new_num_c > 49:
+        new_num_c -= 48
+    c_kill_sx = get_shengxiao_by_suima(new_num_c, year)
+    kill_set = {c_kill_sx, latest["te_sx"]}
+
+    # ============ 第二层：主力选肖 ============
+    # 平五+8 → 九肖池
     ping5_num = latest["ping_nums"][4]
     center_num = (ping5_num - 1 + 8) % 49 + 1
     center_sx = get_shengxiao_by_suima(center_num, year)
     center_idx = ZODIAC.index(center_sx)
     pool_9 = [ZODIAC[(center_idx + i) % 12] for i in range(-4, 5)]
 
+    # 遗漏值条件替换
     outside = [s for s in ZODIAC if s not in pool_9]
     best_outside = max(outside, key=lambda s: missing[s])
     worst_inside = min(pool_9, key=lambda s: missing[s])
@@ -140,37 +149,38 @@ def predict_oracle(records):
     else:
         final_nine = pool_9
 
-    # 3. 合冲池
+    # 清除九肖池中的杀肖（用索引安全替换）
+    final_nine_clean = list(final_nine)
+    for i in range(len(final_nine_clean)):
+        if final_nine_clean[i] in kill_set:
+            candidates = [x for x in ZODIAC if x not in final_nine_clean and x not in kill_set]
+            if candidates:
+                replacement = max(candidates, key=lambda x: missing[x])
+                final_nine_clean[i] = replacement
+
+    # 合冲池和F5投票（用于排序）
     hechong_pool = get_hechong_pool(latest["te_sx"])
-
-    # 4. 手工杀肖（M=48规则）
-    ping2_num = latest["ping_nums"][1]
-    new_num_c = ping2_num + 3
-    if new_num_c > 49:
-        new_num_c -= 48
-    c_kill_sx = get_shengxiao_by_suima(new_num_c, year)
-    manual_kill_set = {c_kill_sx, latest["te_sx"]}
-    e_kill_set = {c_kill_sx}  # 金标规则待后续动态加载
-
-    # 5. F5多信号投票制六肖
     votes_f5 = Counter()
     for s in ZODIAC:
-        if s in final_nine:
+        if s in final_nine_clean:
             votes_f5[s] += 3
         if s in hechong_pool:
             votes_f5[s] += 2
-        if s not in manual_kill_set:
-            votes_f5[s] += 1
-        if s not in e_kill_set:
+        if s not in kill_set:
             votes_f5[s] += 1
         if missing[s] >= 20:
             votes_f5[s] += 2
         votes_f5[s] += int(missing[s] / 10)
 
-    sorted_f5 = sorted(votes_f5.items(), key=lambda x: x[1], reverse=True)
-    final_six = [s for s, _ in sorted_f5[:6]]
+    # 九肖按得票排序（得票越高越优先）
+    final_nine_ranked = sorted(final_nine_clean, key=lambda s: votes_f5.get(s, 0), reverse=True)
 
-    # 6. 动态尾数（窗口10期，频率逆向，取前7）
+    # ============ 第三层：精选六肖 ============
+    safe_votes = {s: votes_f5[s] for s in final_nine_ranked}
+    sorted_safe = sorted(safe_votes.items(), key=lambda x: x[1], reverse=True)
+    final_six_ranked = [s for s, _ in sorted_safe[:6]]
+
+    # ---- 动态尾数（窗口10期，频率逆向，取前7） ----
     TAIL_WINDOW = 10
     tail_freq = Counter()
     for i in range(max(0, len(records) - TAIL_WINDOW - 1), len(records) - 1):
@@ -180,11 +190,11 @@ def predict_oracle(records):
     sorted_tails = sorted(tail_scores.items(), key=lambda x: x[1], reverse=True)
     top7_tails = [t for t, _ in sorted_tails[:7]]
 
-    # 7. 号码交集（生肖保底+尾数补充）
+    # ---- 号码交集（仅基于六肖） ----
     zodiac_nums = {s: get_suima_by_shengxiao(s, year) for s in ZODIAC}
-    sorted_zodiacs = sorted(missing.items(), key=lambda x: x[1], reverse=True)
-    top6_zodiacs = [s for s, _ in sorted_zodiacs[:6]]
+    top6_zodiacs = final_six_ranked
     num_pool = []
+    # 生肖保底：每个六肖取尾数得分最高的1个号码
     for s in top6_zodiacs:
         best_n = None
         best_score = -1
@@ -194,6 +204,7 @@ def predict_oracle(records):
                 best_n = n
         if best_n is not None and best_n not in num_pool:
             num_pool.append(best_n)
+    # 尾数补充
     for t, _ in sorted_tails:
         if len(num_pool) >= 12:
             break
@@ -206,18 +217,13 @@ def predict_oracle(records):
                     break
     final_numbers = num_pool[:12]
 
-    # 8. 大范围生肖
-    killed_sx_set = manual_kill_set
-    remaining_zodiacs = [s for s in ZODIAC if s not in killed_sx_set]
-    remaining_zodiacs.sort(key=lambda s: missing[s], reverse=True)
-
-    # 9. 生肖→号码映射
+    # ---- 生肖→号码映射 ----
     zodiac_num_map = {}
     for n in final_numbers:
         z = get_shengxiao_by_suima(n, year)
         zodiac_num_map.setdefault(z, []).append(n)
 
-    # 10. 下期期号
+    # ---- 下期期号 ----
     next_qihao = ""
     try:
         exp = latest["qishu"]
@@ -230,27 +236,29 @@ def predict_oracle(records):
         "latest_issue": latest["qishu"],
         "latest_te_sx": latest["te_sx"],
         "next_qihao": next_qihao,
-        "nine_pool": final_nine,
-        "six_pool": final_six,
-        "kill_zodiacs": list(killed_sx_set),
-        "range_zodiacs": remaining_zodiacs,
+        "nine_pool": final_nine_ranked,
+        "six_pool": final_six_ranked,
+        "kill_zodiacs": list(kill_set),
+        "range_zodiacs": final_nine_ranked,
         "numbers": final_numbers,
         "zodiac_num_map": zodiac_num_map,
         "top7_tails": top7_tails,
     }
 
 
-# ========== 命中追踪 ==========
+# ==================== 命中追踪（保持不变） ====================
 def load_hit_track():
     if not os.path.exists(TRACK_FILE):
         return []
     with open(TRACK_FILE, "r", encoding="utf-8") as f:
         return json.load(f)
 
+
 def save_hit_track(track):
     os.makedirs(RECORD_DIR, exist_ok=True)
     with open(TRACK_FILE, "w", encoding="utf-8") as f:
         json.dump(track, f, ensure_ascii=False, indent=2)
+
 
 def verify_last_prediction(records):
     track = load_hit_track()
@@ -277,6 +285,7 @@ def verify_last_prediction(records):
     print(f"[Oracle] 上期{predicted_issue}已校验: 九肖{hit9_str} 六肖{hit6_str}")
     return track
 
+
 def append_prediction_to_track(issue, nine, six):
     track = load_hit_track()
     track.append({
@@ -289,6 +298,7 @@ def append_prediction_to_track(issue, nine, six):
     save_hit_track(track)
     return track
 
+
 def calc_dynamic_rate(window=50):
     track = load_hit_track()
     valid = [t for t in track if t.get("hit9", -1) >= 0][-window:]
@@ -300,7 +310,7 @@ def calc_dynamic_rate(window=50):
     return hits9 / total * 100, hits6 / total * 100, hits9, hits6
 
 
-# ========== 主函数 ==========
+# ==================== 主函数 ====================
 def predict_latest(auto_update=False):
     data = load_all_data(auto_update=auto_update)
     records = extract_records(data)
@@ -447,18 +457,3 @@ if __name__ == "__main__":
         hp = os.path.join(BASE_DIR, "oracle.html")
         if os.path.exists(hp):
             webbrowser.open(hp)
-
-        save_js(result)
-
-        record_path = os.path.join(RECORD_DIR, "oracle_history.txt")
-        issue = result.get("latest_issue", "")
-        existing = ""
-        if os.path.exists(record_path):
-            with open(record_path, "r", encoding="utf-8") as f:
-                existing = f.read()
-        if f"基于期号: {issue}" not in existing:
-            with open(record_path, "a", encoding="utf-8") as f:
-                f.write("\n" + text + "\n")
-            print(f"[Oracle] 已记录到 oracle记录")
-        else:
-            print(f"[Oracle] SKIP 期号 {issue} 已有记录")
