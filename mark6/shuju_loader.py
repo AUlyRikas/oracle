@@ -49,6 +49,8 @@ def load_local_data(year):
             records = data.get('data', [])
             # 确保已转换
             for r in records:
+                if not str(r.get('expect', '')).startswith(str(year)):  # ← 新增这一行
+                    continue                                              # ← 新增这一行
                 convert_record_to_simplified(r)
             return records
     except Exception as e:
@@ -89,6 +91,7 @@ def fetch_api_data(year):
             # 转换繁体到简体
             for r in records:
                 convert_record_to_simplified(r)
+            records = [r for r in records if str(r.get('expect', '')).startswith(str(year))]  # ← 新增这一行
             return records
         else:
             print(f"⚠️ {year}年 API 返回格式异常")
