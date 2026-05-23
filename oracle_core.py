@@ -26,7 +26,7 @@ import json
 import os
 import sys
 from datetime import datetime
-from collections import Counter
+from collections import Counter, defaultdict
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MARK6_DIR = os.path.join(BASE_DIR, "mark6")
@@ -169,6 +169,7 @@ def model_oracle(records, idx):
 # ==================== M2: 降权 ====================
 def model_reference(records, idx):
     curr = records[idx - 1]
+    year = curr["year"]
     missing = {}
     for s in ZODIAC:
         streak = 0
@@ -177,16 +178,44 @@ def model_reference(records, idx):
             else: break
         missing[s] = streak
     max_m = max(missing.values()) if missing else 1
-    ping2 = curr["ping_nums"][1]
-    new_num = ping2 + 3
-    if new_num > 49: new_num -= 48
-    fix_kill = get_shengxiao_by_suima(new_num, curr["year"])
+
     scores = {}
     for s in ZODIAC:
         score = missing[s] / max_m * 100
+        ping2 = curr["ping_nums"][1]
+        new_num = ping2 + 3
+        if new_num > 49: new_num -= 48
+        fix_kill = get_shengxiao_by_suima(new_num, year)
         if s == fix_kill: score -= 15
         if s == curr["te_sx"]: score -= 10
         scores[s] = score
+
+    # ========== 增强：交叉维度罕见加分 ==========
+    WINDOW = 30       # 统计窗口
+    WEIGHT = 3.0      # 加分权重
+    start = max(0, idx - WINDOW)
+    freq = defaultdict(int)
+    for i in range(start, idx - 1):
+        prev_curr = records[i]
+        te_sx_prev = prev_curr["te_sx"]
+        for pos_idx in range(6):
+            ping_tail_prev = prev_curr["ping_nums"][pos_idx] % 10
+            freq[(te_sx_prev, ping_tail_prev)] += 1
+
+    cross_bonus = defaultdict(float)
+    te_sx_curr = curr["te_sx"]
+    for pos_idx in range(6):
+        ping_tail_curr = curr["ping_nums"][pos_idx] % 10
+        cnt = freq.get((te_sx_curr, ping_tail_curr), 0)
+        # 罕见加分：出现次数越少，加分越多
+        bonus = -cnt * WEIGHT
+        # 将加分分配给该平码尾数对应的生肖（即当期平肖）
+        cross_bonus[curr["ping_sx"][pos_idx]] += bonus
+
+    for s in ZODIAC:
+        scores[s] += cross_bonus.get(s, 0)
+    # ==========================================
+
     sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     nine = [s for s, _ in sorted_items[:9]]
     return nine, nine[:6]
