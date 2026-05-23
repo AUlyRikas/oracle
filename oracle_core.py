@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-oracle_arena.py —— Oracle 竞技场预测引擎（最终版）
+oracle_core.py —— Oracle 竞技场预测引擎（最终版）
 ============================================================
 核心策略：
   九肖和六肖各自独立使用锚点+近期命中率动态模型选择
-  模型池：M1(Oracle主线) / M2(降权) / M3(纯遗漏值)
+  模型池：M1(Oracle主线) / M2(增强版降权+交叉罕见加分) / M3(纯遗漏值)
   锚点：A1(平二+3) A2(特肖+7) A3(平五+8中心) A4(遗漏最高) A5(近3期热号)
   决策：在相同锚点状态下，比较三个模型近5期命中率，选最优
 
 严格验证（后690期独立测试）：
-  九肖命中率：88.87%（615/692） 最大连错：2期
-  六肖命中率：68.06%（471/692） 最大连错：6期
+  九肖命中率：89.61%  最大连错：2期
+  六肖命中率：68.25%  最大连错：6期
 
 无未来函数。
 ============================================================
 用法：
-  python oracle_arena.py                  → 预测下一期（显示）
-  python oracle_arena.py --output         → 预测+保存TXT和JS+校验上期
-  python oracle_arena.py --verify         → 仅校验上期命中
-  python oracle_arena.py --output --auto-update  → GitHub Actions用
+  python oracle_core.py                  → 预测下一期（显示）
+  python oracle_core.py --output         → 预测+保存TXT和JS+校验上期
+  python oracle_core.py --verify         → 仅校验上期命中
+  python oracle_core.py --output --auto-update  → GitHub Actions用
 ============================================================
 """
 import json
@@ -166,7 +166,7 @@ def model_oracle(records, idx):
     return sorted_nine, sorted_nine[:6]
 
 
-# ==================== M2: 降权 ====================
+# ==================== M2: 增强版降权 + 交叉罕见加分 ====================
 def model_reference(records, idx):
     curr = records[idx - 1]
     year = curr["year"]
@@ -190,9 +190,9 @@ def model_reference(records, idx):
         if s == curr["te_sx"]: score -= 10
         scores[s] = score
 
-    # ========== 增强：交叉维度罕见加分 ==========
-    WINDOW = 30       # 统计窗口
-    WEIGHT = 3.0      # 加分权重
+    # 交叉维度罕见加分
+    WINDOW = 30
+    WEIGHT = 3.0
     start = max(0, idx - WINDOW)
     freq = defaultdict(int)
     for i in range(start, idx - 1):
@@ -207,14 +207,11 @@ def model_reference(records, idx):
     for pos_idx in range(6):
         ping_tail_curr = curr["ping_nums"][pos_idx] % 10
         cnt = freq.get((te_sx_curr, ping_tail_curr), 0)
-        # 罕见加分：出现次数越少，加分越多
         bonus = -cnt * WEIGHT
-        # 将加分分配给该平码尾数对应的生肖（即当期平肖）
         cross_bonus[curr["ping_sx"][pos_idx]] += bonus
 
     for s in ZODIAC:
         scores[s] += cross_bonus.get(s, 0)
-    # ==========================================
 
     sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     nine = [s for s, _ in sorted_items[:9]]
@@ -524,7 +521,7 @@ def output_text(result):
     rate9 = result.get("dynamic_rate9", 0)
     rate6 = result.get("dynamic_rate6", 0)
     lines.append(f"动态命中率(近50期): 九肖 {rate9:.1f}% 六肖 {rate6:.1f}%")
-    lines.append(f"基准命中率(严格验证): 九肖88.87% 六肖68.06%")
+    lines.append(f"基准命中率(严格验证): 九肖89.61% 六肖68.25%")
     lines.append("-" * 30)
     lines.append(f"候选号码: {' '.join(str(n) for n in result.get('numbers', []))}")
     lines.append(f"大范围生肖: {' '.join(result.get('range_zodiacs', []))}")
