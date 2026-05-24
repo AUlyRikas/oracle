@@ -17,7 +17,7 @@ jobs:
       - name: 安装依赖
         run: pip install requests
       - name: 运行Oracle预测
-        run: python oracle_core.py --output
+        run: python oracle_core.py --output --auto-update
       - name: 提交更新
         run: |
           git config user.name "github-actions"
