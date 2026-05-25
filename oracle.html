@@ -64,7 +64,7 @@
 </div>
 <div id="app" class="page-width" style="display:none;">
     <div class="logo-box">
-        <div style="font-size:32px;font-weight:bold;color:#1a3d96;letter-spacing:4px;">oracle概率真实版</div>
+        <div style="font-size:32px;font-weight:bold;color:#1a3d96;letter-spacing:4px;">oracle九肖80%&六肖55%</div>
     </div>
     <div class="daohang">
         <a id="navHome"><div class="daohangdiv" style="background:rgb(217,0,17);">首頁</div></a>
@@ -121,7 +121,7 @@
     <footer>版權所有 不得轉載 AI预测</footer>
 </div>
 
-<script src="oracle_data.js"></script>
+<script>document.write('<script src="oracle_data.js?t='+Date.now()+'"><\/script>');</script>
 <script>
 var oracleData = window.oracleData || {};
 
@@ -157,35 +157,27 @@ function loadLive(){
     document.getElementById('currentExpect').textContent=p.issue;
     document.getElementById('countdownExpect').textContent=p.issue;
 
-    fetch(HISTORY_API)
-    .then(function(r){return r.json();})
-    .then(function(json){
-        var arr=json?.data||(Array.isArray(json)?json:null);
-        if(arr&&arr.length){
-            var latest=arr[0];
-            var codes=latest.openCode.split(',').map(function(s){return s.trim();});
-            var zodiacs=latest.zodiac?latest.zodiac.split(',').map(function(z){return z.trim();}):[];
-            while(zodiacs.length<codes.length)zodiacs.push('?');
-            var html='';
-            for(var i=0;i<codes.length;i++){
-                html+='<div class="open_code_zone_left-item"><div class="open_code_zone_left-item-number '+getBallClass(codes[i])+'">'+codes[i]+'</div><div class="open_code_zone_left-item-zodiac">'+zodiacs[i]+'</div></div>';
-                if(i===5)html+='<div class="open_code_zone_left-item"><div class="open_code_zone_left-item-plus">+</div><div class="open_code_zone_left-item-zodiac">特码</div></div>';
-            }
-            document.getElementById('liveBallContainer').innerHTML=html;
-        }
-    }).catch(function(){
-        document.getElementById('liveBallContainer').innerHTML='<div style="color:#999;padding:20px;text-align:center;">暂无开奖数据</div>';
-    });
+// 从本地 oracleData 直接渲染开奖号码
+var codes=p.code.split(',').map(function(s){return s.trim();});
+var zodiacs=p.zodiac?p.zodiac.split(',').map(function(z){return z.trim();}):[];
+while(zodiacs.length<codes.length)zodiacs.push('?');
+var html='';
+for(var i=0;i<codes.length;i++){
+    html+='<div class="open_code_zone_left-item"><div class="open_code_zone_left-item-number '+getBallClass(codes[i])+'">'+codes[i]+'</div><div class="open_code_zone_left-item-zodiac">'+zodiacs[i]+'</div></div>';
+    if(i===5)html+='<div class="open_code_zone_left-item"><div class="open_code_zone_left-item-plus">+</div><div class="open_code_zone_left-item-zodiac">特码</div></div>';
+}
+document.getElementById('liveBallContainer').innerHTML=html;
 
     document.getElementById('predictResultArea').innerHTML=
         '<div class="predict-card">'+
-        '<div class="predict-title">下一期: '+p.nextIssue+'</div>'+
-        '<div class="predict-subtitle">基于期号: '+p.issue+' | '+p.time+'</div>'+
+        '<div class="predict-title">预测下一期: '+p.nextIssue+'</div>'+
+        '<div class="predict-subtitle">基于期号: '+p.issue+' | '+p.time+' | 特肖 '+p.teSx+'(尾'+p.teWei+')</div>'+
         '<div class="predict-balls-row">'+p.numbers.slice(0,12).map(function(n){return '<div class="predict-ball '+getBallClass(n)+'">'+n+'</div>';}).join('')+'</div>'+
-        '<div class="predict-tags"><span class="predict-tag range-tag">大范围生肖: '+p.rangeZodiacs.join('、')+'</span></div>'+
-        '<div class="predict-tags"><span class="predict-tag green-tag">六肖: '+p.sixPool.join('、')+'</span><span class="predict-tag red-tag">杀肖: '+p.killZodiacs.join('、')+'</span></div>'+
+        '<div class="predict-tags"><span class="predict-tag">大范围生肖: '+p.rangeZodiacs.join('、')+'</span></div>'+
+        '<div class="predict-tags"><span class="predict-tag green-tag">重点候选生肖: '+p.sixPool.join('、')+'</span><span class="predict-tag red-tag">杀肖: '+p.killZodiacs.join('、')+'</span></div>'+
         '<div class="predict-tags">'+Object.entries(p.zodiacNumMap).map(function(e){return '<span class="predict-tag">'+e[0]+': '+e[1].join(',')+'</span>';}).join('')+'</div>'+
-        (p.top7Tails&&p.top7Tails.length?'<div class="predict-tags"><span class="predict-tag">动态尾数: '+p.top7Tails.join('、')+'</span></div>':'')+
+        (p.top7Tails&&p.top7Tails.length?'<div class="predict-tags"><span class="predict-tag tail-tag">动态尾数: '+p.top7Tails.join('、')+'</span></div>':'')+
+        (p.dynamicRate6!==undefined?'<div class="predict-subtitle" style="margin-top:8px;">近50期命中率: 九肖 '+p.dynamicRate9+'% | 六肖 '+p.dynamicRate6+'%</div>':'')+
         '</div>';
 }
 
