@@ -121,7 +121,23 @@
     <footer>版權所有 不得轉載 AI预测</footer>
 </div>
 
-<script>document.write('<script src="oracle_data.js?t='+Date.now()+'"><\/script>');</script>
+<script>
+(function() {
+    var loaded = false;
+    var timeout = setTimeout(function() {
+        if (!loaded) {
+            var fb = document.createElement('script');
+            fb.src = 'https://raw.githubusercontent.com/AUlyRikas/oracle/main/oracle_data.js?v=' + Date.now();
+            fb.onload = function() { loaded = true; };
+            document.head.appendChild(fb);
+        }
+    }, 3000);
+    var pr = document.createElement('script');
+    pr.src = 'oracle_data.js?v=' + Date.now();
+    pr.onload = function() { loaded = true; clearTimeout(timeout); };
+    document.head.appendChild(pr);
+})();
+</script>
 <script>
 var oracleData = window.oracleData || {};
 
