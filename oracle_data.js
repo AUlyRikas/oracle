@@ -90,6 +90,6 @@ var oracleData = {
     5,
     8
   ],
-  "dynamicRate9": 80.48780487804879,
-  "dynamicRate6": 63.41463414634146
+  "dynamicRate9": 80.95238095238095,
+  "dynamicRate6": 64.28571428571429
 };
