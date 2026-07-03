@@ -121,6 +121,7 @@
     <footer>版權所有 不得轉載 AI预测</footer>
 </div>
 
+<!-- ★ 自动降级加载 JS ★ -->
 <script>
 (function() {
     var loaded = false;
@@ -138,14 +139,14 @@
     document.head.appendChild(pr);
 })();
 </script>
-<script>
 
+<script>
 function checkPwd(){
     var p=document.getElementById('pwd').value;
     if(p==='5121'){
         document.getElementById('lock').style.display='none';
         document.getElementById('app').style.display='block';
-        initAll();
+        setTimeout(initAll, 500); // 等 JS 加载完成
     }else{
         document.getElementById('lockMsg').innerText='密码错误，请重试';
         document.getElementById('pwd').value='';
@@ -161,27 +162,31 @@ const greenSet=new Set([5,6,11,16,17,21,22,27,28,32,33,38,39,43,44,49]);
 function getBallClass(num){let n=parseInt(num);if(redSet.has(n))return'ball-red';if(blueSet.has(n))return'ball-blue';return'ball-green';}
 
 function initAll(){
-    loadLive();
+    if(typeof oracleData !== 'undefined'){
+        loadLive();
+    }
     loadHistory();
     startCountdown();
 }
 
 function loadLive(){
     var p=window.oracleData;
-    if(!p||!p.issue)return;
+    if(!p||!p.issue){
+        document.getElementById('predictResultArea').innerHTML='<div class="predict-card"><div class="predict-title">等待数据加载...</div></div>';
+        return;
+    }
     document.getElementById('currentExpect').textContent=p.issue;
     document.getElementById('countdownExpect').textContent=p.issue;
 
-// 从本地 oracleData 直接渲染开奖号码
-var codes=p.code.split(',').map(function(s){return s.trim();});
-var zodiacs=p.zodiac?p.zodiac.split(',').map(function(z){return z.trim();}):[];
-while(zodiacs.length<codes.length)zodiacs.push('?');
-var html='';
-for(var i=0;i<codes.length;i++){
-    html+='<div class="open_code_zone_left-item"><div class="open_code_zone_left-item-number '+getBallClass(codes[i])+'">'+codes[i]+'</div><div class="open_code_zone_left-item-zodiac">'+zodiacs[i]+'</div></div>';
-    if(i===5)html+='<div class="open_code_zone_left-item"><div class="open_code_zone_left-item-plus">+</div><div class="open_code_zone_left-item-zodiac">特码</div></div>';
-}
-document.getElementById('liveBallContainer').innerHTML=html;
+    var codes=p.code.split(',').map(function(s){return s.trim();});
+    var zodiacs=p.zodiac?p.zodiac.split(',').map(function(z){return z.trim();}):[];
+    while(zodiacs.length<codes.length)zodiacs.push('?');
+    var html='';
+    for(var i=0;i<codes.length;i++){
+        html+='<div class="open_code_zone_left-item"><div class="open_code_zone_left-item-number '+getBallClass(codes[i])+'">'+codes[i]+'</div><div class="open_code_zone_left-item-zodiac">'+zodiacs[i]+'</div></div>';
+        if(i===5)html+='<div class="open_code_zone_left-item"><div class="open_code_zone_left-item-plus">+</div><div class="open_code_zone_left-item-zodiac">特码</div></div>';
+    }
+    document.getElementById('liveBallContainer').innerHTML=html;
 
     document.getElementById('predictResultArea').innerHTML=
         '<div class="predict-card">'+
@@ -243,12 +248,26 @@ function processHistoryData(json){
 }
 
 function refreshAI(){
-    var oldScript=document.querySelector('script[src="oracle_data.js"]');if(oldScript)oldScript.remove();delete window.oracleData;
+    // 清理所有加载过 oracle_data.js 的 script 标签
+    var oldScripts = document.querySelectorAll('script[src*="oracle_data.js"]');
+    oldScripts.forEach(function(s) { s.remove(); });
+    delete window.oracleData;
     document.getElementById('predictResultArea').innerHTML='<div class="predict-card"><div class="predict-title">刷新预测中...</div></div>';
-    var script=document.createElement('script');script.src='oracle_data.js?t='+Date.now();
-    script.onload=function(){if(typeof oracleData!=='undefined'){loadLive();}};
-    script.onerror=function(){document.getElementById('predictResultArea').innerHTML='<div class="predict-card"><div class="predict-title">预测数据加载失败</div></div>';};
-    document.head.appendChild(script);
+    // 重新触发自动降级加载
+    var loaded = false;
+    var timeout = setTimeout(function() {
+        if (!loaded) {
+            var fb = document.createElement('script');
+            fb.src = 'https://raw.githubusercontent.com/AUlyRikas/oracle/main/oracle_data.js?v=' + Date.now();
+            fb.onload = function() { loaded = true; if(typeof oracleData !== 'undefined'){loadLive();} };
+            document.head.appendChild(fb);
+        }
+    }, 3000);
+    var pr = document.createElement('script');
+    pr.src = 'oracle_data.js?v=' + Date.now();
+    pr.onload = function() { loaded = true; clearTimeout(timeout); if(typeof oracleData !== 'undefined'){loadLive();} };
+    pr.onerror = function(){document.getElementById('predictResultArea').innerHTML='<div class="predict-card"><div class="predict-title">预测数据加载失败</div></div>';};
+    document.head.appendChild(pr);
 }
 
 document.addEventListener('DOMContentLoaded',function(){
