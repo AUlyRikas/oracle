@@ -91,5 +91,5 @@ var oracleData = {
     3
   ],
   "dynamicRate9": 84.0,
-  "dynamicRate6": 66.0
+  "dynamicRate6": 68.0
 };
