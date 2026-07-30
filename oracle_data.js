@@ -1,33 +1,33 @@
 var oracleData = {
-  "time": "2026-07-29 21:32:32",
-  "issue": "2026210",
-  "code": "40,37,15,17,42,48,49",
-  "zodiac": "兔,马,龙,虎,牛,羊,马",
-  "wave": "red,blue,blue,green,blue,blue,green",
+  "time": "2026-07-30 21:32:32",
+  "issue": "2026211",
+  "code": "13,12,39,37,38,8,1",
+  "zodiac": "马,羊,龙,马,蛇,猪,马",
+  "wave": "red,red,green,blue,green,red,red",
   "teSx": "马",
-  "teWei": "9",
-  "nextIssue": "2026211",
+  "teWei": "1",
+  "nextIssue": "2026212",
   "ninePool": [
     "牛",
     "鸡",
     "羊",
     "狗",
-    "虎",
-    "龙",
     "猴",
+    "鼠",
     "蛇",
-    "兔"
+    "兔",
+    "猪"
   ],
   "sixPool": [
     "牛",
     "鸡",
     "羊",
     "狗",
-    "虎",
-    "龙"
+    "猴",
+    "鼠"
   ],
   "killZodiacs": [
-    "兔",
+    "龙",
     "马"
   ],
   "rangeZodiacs": [
@@ -35,24 +35,24 @@ var oracleData = {
     "鸡",
     "羊",
     "狗",
-    "虎",
-    "龙",
     "猴",
+    "鼠",
     "蛇",
-    "兔"
+    "兔",
+    "猪"
   ],
   "numbers": [
     6,
     34,
     24,
     21,
-    17,
-    3,
+    11,
+    7,
     46,
     36,
     30,
     10,
-    41,
+    31,
     42
   ],
   "zodiacNumMap": {
@@ -73,12 +73,12 @@ var oracleData = {
     "狗": [
       21
     ],
-    "虎": [
-      17,
-      41
+    "猴": [
+      11
     ],
-    "龙": [
-      3
+    "鼠": [
+      7,
+      31
     ]
   },
   "top7Tails": [
@@ -91,5 +91,5 @@ var oracleData = {
     7
   ],
   "dynamicRate9": 92.0,
-  "dynamicRate6": 64.0
+  "dynamicRate6": 62.0
 };
